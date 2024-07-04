@@ -4,6 +4,7 @@ import "core:io"
 import "core:time"
 import "core:encoding/json"
 import "core:strconv"
+import "core:strings"
 import "core:fmt"
 
 Note :: struct {
@@ -11,23 +12,55 @@ Note :: struct {
     timestamp: i64,
 }
 
-Dump :: struct { }
+List :: struct { }
 New :: struct { contents: string }
 Edit :: struct { note_index: uint, new_contents: string }
 Help :: struct { }
-Command :: union #no_nil { Dump, New, Edit, Help }
+Command :: union #no_nil { List, New, Edit, Help }
 
-dump_notes :: proc() {
+
+NotesLoadError :: enum {
+    None,
+    FileReadError,
+    JsonParseError,
+    AllocationError,
 }
-new_note :: proc() {
+
+load_notes :: proc(base_dir: string) -> ([]Note, NotesLoadError) {
+    notes := []Note{}
+    notes_path, alloc_err := strings.concatenate([]string { base_dir, "/renoter_notes.json" })
+    if alloc_err != .None {
+        fmt.println("Allocation error")
+        return notes, NotesLoadError.AllocationError
+    }
+    defer delete(notes_path)
+
+    contents, success := os.read_entire_file_from_filename(notes_path)
+    if !success {
+        fmt.println("Error reading notes file")
+        return notes, NotesLoadError.FileReadError
+    }
+    defer delete(contents)
+
+    json_contents, err := json.parse(contents)
+    if err != .None {
+        fmt.println("Error decoding notes:", err)
+        return notes, NotesLoadError.JsonParseError
+    }
+    defer json.destroy_value(json_contents)
+
+    fmt.println(json_contents)
+    return notes, NotesLoadError.None
 }
-edit_note :: proc() {
-}
+
+list_notes :: proc() { }
+new_note :: proc() { }
+edit_note :: proc() { }
 
 print_help :: proc() {
     fmt.println("Usage: <command> <arguments...>")
     fmt.println("Commands:")
-    fmt.println("    dump                               - Dump all notes")
+    fmt.println("    list                               - List all notes")
     fmt.println("    new    <note_contents>             - Create a new note")
     fmt.println("    edit   <note_index> <new_contents> - Edit an existing note")
     fmt.println("    retire <note_index>                - Retire an existing note")
@@ -36,11 +69,27 @@ print_help :: proc() {
 }
 
 main :: proc() {
+    env := os.environ()
+    xdg_state_home: string
+    for pair in env {
+        list, err := strings.split(pair, "=")
+        if err != .None {
+            fmt.println("Allocation error")
+            return
+        }
+
+        if list[0] == "XDG_STATE_HOME" {
+            xdg_state_home = list[1]
+        }
+    }
+
+    notes, err := load_notes(xdg_state_home)
+
     args := os.args
     command := parse_command(args)
 
     switch _ in command {
-    case Dump: dump_notes()
+    case List: list_notes()
     case New: new_note()
     case Edit: edit_note()
     case Help: print_help()
@@ -49,7 +98,6 @@ main :: proc() {
 
 parse_command :: proc(arguments: []string) -> Command {
     if len(arguments) < 2 {
-        fmt.println("Usage: <command> <arguments...>")
         return Help{}
     }
 
@@ -57,7 +105,7 @@ parse_command :: proc(arguments: []string) -> Command {
     command_name := arguments[1]
 
     switch command_name {
-    case "dump": return Dump{}
+    case "list": return List{}
     case "new": return parse_new(arguments[1:])
     case "edit": return parse_edit(arguments[1:])
     case "help": return Help{}
